@@ -40,23 +40,6 @@
 #include "wcdcal-hwdep.h"
 #include "wcd_cpe_core.h"
 
-struct sound_control {
-	struct snd_soc_codec *snd_control_codec;
-	int default_hp_value;
-	int default_mic_value;
-	int default_camera_mic_value;
-	int default_speaker_value;
-	bool hp_lock;
-	bool mic_lock;
-	bool camera_mic_lock;
-	bool speaker_lock;
-} soundcontrol = {
-	.hp_lock = false,
-	.mic_lock = false,
-	.camera_mic_lock = false,
-	.speaker_lock = false,
-};
-
 enum {
 	VI_SENSE_1,
 	VI_SENSE_2,
@@ -5316,63 +5299,16 @@ static int tomtom_volatile(struct snd_soc_codec *ssc, unsigned int reg)
 	return 0;
 }
 
-static int reg_access(unsigned int reg)
-{
-	int ret = 1;
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+extern int snd_hax_reg_access(unsigned int);
+extern unsigned int snd_hax_cache_read(unsigned int);
+extern void snd_hax_cache_write(unsigned int, unsigned int);
+#endif
 
-	switch (reg) {
-		case TOMTOM_A_CDC_RX1_VOL_CTL_B2_CTL:
-		case TOMTOM_A_CDC_RX2_VOL_CTL_B2_CTL:
-			if (soundcontrol.hp_lock)
-                                ret = 0;
-                        break;
-		case TOMTOM_A_CDC_TX6_VOL_CTL_GAIN:
-			if (soundcontrol.mic_lock)
-				ret = 0;
-			break;
-		case TOMTOM_A_CDC_TX4_VOL_CTL_GAIN:
-			if (soundcontrol.camera_mic_lock)
-				ret = 0;
-			break;
-	}
-
-	return ret;
-}
-
-static int tomtom_write(struct snd_soc_codec *codec, unsigned int reg,
-	unsigned int value)
-{
-	int val;
-	int ret;
-	struct wcd9xxx *wcd9xxx = codec->control_data;
-	struct tomtom_priv *tomtom_p = snd_soc_codec_get_drvdata(codec);
-
-	if (reg == SND_SOC_NOPM)
-		return 0;
-
-	BUG_ON(reg > TOMTOM_MAX_REGISTER);
-
-	if (!tomtom_volatile(codec, reg)) {
-		ret = snd_soc_cache_write(codec, reg, value);
-		if (ret != 0)
-			dev_err(codec->dev, "Cache write to %x failed: %d\n",
-				reg, ret);
-	}
-
-	if (unlikely(test_bit(BUS_DOWN, &tomtom_p->status_mask))) {
-		dev_err(codec->dev, "write 0x%02x while offline\n", reg);
-		return -ENODEV;
-	} else {
-		if (!reg_access(reg))
-			val = wcd9xxx_reg_read(&wcd9xxx->core_res, reg);
-		else
-			val = value;
-
-		return wcd9xxx_reg_write(&wcd9xxx->core_res, reg, val);
-	}
-}
-
-static unsigned int tomtom_read(struct snd_soc_codec *codec,
+#ifndef CONFIG_SOUND_CONTROL_HAX_3_GPL 
+static
+#endif
+unsigned int tomtom_read(struct snd_soc_codec *codec,
 				unsigned int reg)
 {
 	unsigned int val;
@@ -5404,6 +5340,51 @@ static unsigned int tomtom_read(struct snd_soc_codec *codec,
 		return val;
 	}
 }
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+EXPORT_SYMBOL(tomtom_read);
+#endif
+
+#ifndef CONFIG_SOUND_CONTROL_HAX_3_GPL
+static
+#endif
+int tomtom_write(struct snd_soc_codec *codec, unsigned int reg,
+ unsigned int value)
+{
+ int ret;
+ struct wcd9xxx *wcd9xxx = codec->control_data;
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+ unsigned int val;
+#endif
+
+ if (reg == SND_SOC_NOPM)
+ return 0;
+
+ BUG_ON(reg > TOMTOM_MAX_REGISTER);
+
+ if (!tomtom_volatile(codec, reg)) {
+ ret = snd_soc_cache_write(codec, reg, value);
+ if (ret != 0)
+ dev_err(codec->dev, "Cache write to %x failed: %d\n",
+ reg, ret);
+ }
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+	if (!snd_hax_reg_access(reg)) {
+		if (!((val = snd_hax_cache_read(reg)) != -1)) {
+			val = wcd9xxx_reg_read_safe(&wcd9xxx->core_res, reg);
+		}
+	} else {
+		snd_hax_cache_write(reg, value);
+		val = value;
+	}
+	return wcd9xxx_reg_write(&wcd9xxx->core_res, reg, val);
+#else
+	return wcd9xxx_reg_write(&wcd9xxx->core_res, reg, value);
+#endif
+}
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+EXPORT_SYMBOL(tomtom_write);
+#endif
+
 
 static int tomtom_startup(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai)
@@ -8817,79 +8798,12 @@ static int tomtom_cpe_initialize(struct snd_soc_codec *codec)
 	return 0;
 }
 
-void update_headphones_volume_boost(unsigned int vol_boost)
-{
-	int default_val = soundcontrol.default_hp_value;
-	int boosted_val = default_val + vol_boost;
-
-	pr_info("Sound Control: Headphones default value %d\n", default_val);
-
-	soundcontrol.hp_lock = false;
-	tomtom_write(soundcontrol.snd_control_codec,
-		TOMTOM_A_CDC_RX1_VOL_CTL_B2_CTL, boosted_val);
-	tomtom_write(soundcontrol.snd_control_codec,
-		TOMTOM_A_CDC_RX2_VOL_CTL_B2_CTL, boosted_val);
-	soundcontrol.hp_lock = true;
-
-	pr_info("Sound Control: Boosted Headphones RX1 value %d\n",
-		tomtom_read(soundcontrol.snd_control_codec,
-		TOMTOM_A_CDC_RX1_VOL_CTL_B2_CTL));
-
-	pr_info("Sound Control: Boosted Headphones RX2 value %d\n",
-		tomtom_read(soundcontrol.snd_control_codec,
-		TOMTOM_A_CDC_RX2_VOL_CTL_B2_CTL));
-}
-
-void update_mic_gain(unsigned int vol_boost)
-{
-	int default_val = soundcontrol.default_mic_value;
-	int boosted_val = default_val + vol_boost;
-
-	pr_info("Sound Control: Mic default value %d\n", default_val);
-
-	soundcontrol.mic_lock = false;
-	tomtom_write(soundcontrol.snd_control_codec,
-		TOMTOM_A_CDC_TX6_VOL_CTL_GAIN, boosted_val);
-	soundcontrol.mic_lock = true;
-
-	pr_info("Sound Control: Boosted Mic value %d\n",
-		tomtom_read(soundcontrol.snd_control_codec,
-		TOMTOM_A_CDC_TX6_VOL_CTL_GAIN));
-}
-
-void update_camera_mic_gain(unsigned int vol_boost)
-{
-        int default_val = soundcontrol.default_camera_mic_value;
-        int boosted_val = default_val + vol_boost;
-
-	pr_info("Sound Control: Camera mic default value %d\n", default_val);
-
-        soundcontrol.camera_mic_lock = false;
-        	tomtom_write(soundcontrol.snd_control_codec,
-                TOMTOM_A_CDC_TX7_VOL_CTL_GAIN, boosted_val);
-        soundcontrol.camera_mic_lock = true;
-
-        pr_info("Sound Control: Boosted Camera mic value %d\n",
-                tomtom_read(soundcontrol.snd_control_codec,
-                TOMTOM_A_CDC_TX7_VOL_CTL_GAIN));
-}
-
-void update_speakers_gain(unsigned int vol_boost)
-{
-        int default_val = soundcontrol.default_speaker_value;
-        int boosted_val = default_val + vol_boost;
-
-        pr_info("Sound Control: Speaker default value %d\n", default_val);
-
-        soundcontrol.speaker_lock = false;
-                tomtom_write(soundcontrol.snd_control_codec,
-                TOMTOM_A_CDC_RX7_VOL_CTL_B2_CTL, boosted_val);
-        soundcontrol.speaker_lock = true;
-
-        pr_info("Sound Control: Boosted Speaker value %d\n",
-                tomtom_read(soundcontrol.snd_control_codec,
-                TOMTOM_A_CDC_RX7_VOL_CTL_B2_CTL));
-}
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+struct snd_soc_codec *fauxsound_codec_ptr;
+EXPORT_SYMBOL(fauxsound_codec_ptr);
+int wcd9xxx_hw_revision;
+EXPORT_SYMBOL(wcd9xxx_hw_revision);
+#endif
 
 static int tomtom_codec_probe(struct snd_soc_codec *codec)
 {
@@ -8903,7 +8817,10 @@ static int tomtom_codec_probe(struct snd_soc_codec *codec)
 	void *ptr = NULL;
 	struct wcd9xxx_core_resource *core_res;
 
-	soundcontrol.snd_control_codec = codec;
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+	pr_info("tomtom codec probe...\n");
+	fauxsound_codec_ptr = codec;
+#endif
 
 	codec->control_data = dev_get_drvdata(codec->dev->parent);
 	control = codec->control_data;
@@ -9078,19 +8995,6 @@ static int tomtom_codec_probe(struct snd_soc_codec *codec)
 		/* Do not fail probe if CPE failed */
 		ret = 0;
 	}
-
-	/*
-	 * Get the default values during probe
-	 */
-	soundcontrol.default_hp_value = tomtom_read(codec,
-		TOMTOM_A_CDC_RX1_VOL_CTL_B2_CTL);
-	soundcontrol.default_mic_value = tomtom_read(codec,
-		TOMTOM_A_CDC_TX6_VOL_CTL_GAIN);
-	soundcontrol.default_camera_mic_value = tomtom_read(codec,
-                TOMTOM_A_CDC_TX7_VOL_CTL_GAIN);
-	soundcontrol.default_speaker_value = tomtom_read(codec,
-		TOMTOM_A_CDC_RX7_VOL_CTL_B2_CTL);
-
 	return ret;
 
 err_pdata:
