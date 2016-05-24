@@ -188,10 +188,4 @@ else
 	fi
 fi
 
-#if [ ! "$THUGVERSION" == "" ];
-#then
-#echo "~$THUGVERSION"
-#else
-#echo "~ThugLife~Bullhead~Beta~$(date +%Y%m%d)"
-#fi
 echo "$res"
