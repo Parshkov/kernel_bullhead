@@ -392,16 +392,14 @@ void register_irq_proc(unsigned int irq, struct irq_desc *desc)
 
 	proc_create_data("spurious", 0444, desc->dir,
 			 &irq_spurious_proc_fops, (void *)(long)irq);
-/*<<<<<<< HEAD
+
 	proc_create_data("disable_depth", 0444, desc->dir,
 			 &irq_disable_depth_proc_fops, (void *)(long)irq);
 	proc_create_data("wake_depth", 0444, desc->dir,
 			 &irq_wake_depth_proc_fops, (void *)(long)irq);
-=======
-*/
-out_unlock:
+
+	out_unlock:
 	mutex_unlock(&register_lock);
-//>>>>>>> 14b58660bc26be42d272f7fb0d153ed8fc0a0c4e
 }
 
 void unregister_irq_proc(unsigned int irq, struct irq_desc *desc)
