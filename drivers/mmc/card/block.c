@@ -3373,7 +3373,8 @@ suspend_error:
 			mmc_hostname(card->host), rc);
 }
 
-static int _mmc_blk_suspend(struct mmc_card *card)
+#ifdef CONFIG_PM
+static int mmc_blk_suspend(struct mmc_card *card)
 {
 	struct mmc_blk_data *part_md;
 	struct mmc_blk_data *md = mmc_get_drvdata(card);
@@ -3398,17 +3399,6 @@ static int _mmc_blk_suspend(struct mmc_card *card)
 	}
  out:
 	return rc;
-}
-
-static void mmc_blk_shutdown(struct mmc_card *card)
-{
-	_mmc_blk_suspend(card);
-}
-
-#ifdef CONFIG_PM
-static int mmc_blk_suspend(struct mmc_card *card)
-{
-	return _mmc_blk_suspend(card);
 }
 
 static int mmc_blk_resume(struct mmc_card *card)
