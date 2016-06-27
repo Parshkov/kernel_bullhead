@@ -114,6 +114,10 @@ enum ieee80211_band {
  *	restrictions.
  * @IEEE80211_CHAN_INDOOR_ONLY: see %NL80211_FREQUENCY_ATTR_INDOOR_ONLY
  * @IEEE80211_CHAN_GO_CONCURRENT: see %NL80211_FREQUENCY_ATTR_GO_CONCURRENT
+ * @IEEE80211_CHAN_NO_20MHZ: 20 MHz bandwidth is not permitted
+ *	on this channel.
+ * @IEEE80211_CHAN_NO_10MHZ: 10 MHz bandwidth is not permitted
+ *	on this channel.
  *
  */
 enum ieee80211_channel_flags {
@@ -128,6 +132,8 @@ enum ieee80211_channel_flags {
 	IEEE80211_CHAN_NO_160MHZ	= 1<<8,
 	IEEE80211_CHAN_INDOOR_ONLY	= 1<<9,
 	IEEE80211_CHAN_GO_CONCURRENT	= 1<<10,
+	IEEE80211_CHAN_NO_20MHZ		= 1<<11,
+	IEEE80211_CHAN_NO_10MHZ		= 1<<12,
 };
 
 #define IEEE80211_CHAN_NO_HT40 \
@@ -1312,6 +1318,8 @@ struct cfg80211_match_set {
  * @channels: channels to scan
  * @min_rssi_thold: for drivers only supporting a single threshold, this
  *	contains the minimum over all matchsets
+ * @owner_nlportid: netlink portid of owner (if this should is a request
+ *	owned by a particular socket)
  */
 struct cfg80211_sched_scan_request {
 	struct cfg80211_ssid *ssids;
@@ -1330,6 +1338,7 @@ struct cfg80211_sched_scan_request {
 	struct wiphy *wiphy;
 	struct net_device *dev;
 	unsigned long scan_start;
+	u32 owner_nlportid;
 
 	/* keep last */
 	struct ieee80211_channel *channels[0];
@@ -2400,6 +2409,7 @@ struct cfg80211_ops {
  *	responds to probe-requests in hardware.
  * @WIPHY_FLAG_OFFCHAN_TX: Device supports direct off-channel TX.
  * @WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL: Device supports remain-on-channel call.
+ * @WIPHY_FLAG_SUPPORTS_5_10_MHZ: Device supports 5 MHz and 10 MHz channels.
  * @WIPHY_FLAG_DFS_OFFLOAD: The driver handles all the DFS related operations.
  */
 enum wiphy_flags {
@@ -2424,7 +2434,8 @@ enum wiphy_flags {
 	WIPHY_FLAG_AP_PROBE_RESP_OFFLOAD	= BIT(19),
 	WIPHY_FLAG_OFFCHAN_TX			= BIT(20),
 	WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL	= BIT(21),
-	WIPHY_FLAG_DFS_OFFLOAD                  = BIT(22)
+	WIPHY_FLAG_SUPPORTS_5_10_MHZ		= BIT(22),
+	WIPHY_FLAG_DFS_OFFLOAD                  = BIT(24)
 };
 
 /**
@@ -2984,6 +2995,7 @@ struct cfg80211_cached_keys;
  * @p2p_started: true if this is a P2P Device that has been started
  * @cac_started: true if DFS channel availability check has been started
  * @cac_start_time: timestamp (jiffies) when the dfs state was entered.
+ * @owner_nlportid: (private) owner socket port ID
  */
 struct wireless_dev {
 	struct wiphy *wiphy;
@@ -3037,6 +3049,8 @@ struct wireless_dev {
 
 	bool cac_started;
 	unsigned long cac_start_time;
+
+	u32 owner_nlportid;
 
 #ifdef CONFIG_CFG80211_WEXT
 	/* wext data */

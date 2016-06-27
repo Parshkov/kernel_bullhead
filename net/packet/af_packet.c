@@ -1150,16 +1150,6 @@ static void packet_sock_destruct(struct sock *sk)
 	sk_refcnt_debug_dec(sk);
 }
 
-static int fanout_rr_next(struct packet_fanout *f, unsigned int num)
-{
-	int x = atomic_read(&f->rr_cur) + 1;
-
-	if (x >= num)
-		x = 0;
-
-	return x;
-}
-
 static unsigned int fanout_demux_hash(struct packet_fanout *f,
 				      struct sk_buff *skb,
 				      unsigned int num)
@@ -1171,13 +1161,9 @@ static unsigned int fanout_demux_lb(struct packet_fanout *f,
 				    struct sk_buff *skb,
 				    unsigned int num)
 {
-	int cur, old;
+	unsigned int val = atomic_inc_return(&f->rr_cur);
 
-	cur = atomic_read(&f->rr_cur);
-	while ((old = atomic_cmpxchg(&f->rr_cur, cur,
-				     fanout_rr_next(f, num))) != cur)
-		cur = old;
-	return cur;
+	return val % num;
 }
 
 static unsigned int fanout_demux_cpu(struct packet_fanout *f,
@@ -1217,7 +1203,7 @@ static int packet_rcv_fanout(struct sk_buff *skb, struct net_device *dev,
 			     struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct packet_fanout *f = pt->af_packet_priv;
-	unsigned int num = f->num_members;
+	unsigned int num = ACCESS_ONCE(f->num_members);
 	struct packet_sock *po;
 	unsigned int idx;
 
@@ -2218,7 +2204,7 @@ static struct sk_buff *packet_alloc_skb(struct sock *sk, size_t prepad,
 		linear = len;
 
 	skb = sock_alloc_send_pskb(sk, prepad + linear, len - linear, noblock,
-				   err);
+				   err, 0);
 	if (!skb)
 		return NULL;
 
@@ -3011,6 +2997,7 @@ static int packet_mc_add(struct sock *sk, struct packet_mreq_max *mreq)
 	i->ifindex = mreq->mr_ifindex;
 	i->alen = mreq->mr_alen;
 	memcpy(i->addr, mreq->mr_address, i->alen);
+	memset(i->addr + i->alen, 0, sizeof(i->addr) - i->alen);
 	i->count = 1;
 	i->next = po->mclist;
 	po->mclist = i;

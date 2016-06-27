@@ -389,6 +389,7 @@ static const struct nla_policy nl80211_policy[NL80211_ATTR_MAX+1] = {
 	[NL80211_ATTR_MAC_HINT] = { .len = ETH_ALEN },
 	[NL80211_ATTR_WIPHY_FREQ_HINT] = { .type = NLA_U32 },
 	[NL80211_ATTR_TDLS_PEER_CAPABILITY] = { .type = NLA_U32 },
+	[NL80211_ATTR_IFACE_SOCKET_OWNER] = { .type = NLA_FLAG },
 };
 
 /* policy for the key attributes */
@@ -570,6 +571,13 @@ static int nl80211_msg_put_channel(struct sk_buff *msg,
 				   struct ieee80211_channel *chan,
 				   bool large)
 {
+	/* Some channels must be completely excluded from the
+	 * list to protect old user-space tools from breaking
+	 */
+	if (!large && chan->flags &
+	    (IEEE80211_CHAN_NO_10MHZ | IEEE80211_CHAN_NO_20MHZ))
+		return 0;
+
 	if (nla_put_u32(msg, NL80211_FREQUENCY_ATTR_FREQ,
 			chan->center_freq))
 		goto nla_put_failure;
@@ -618,6 +626,12 @@ static int nl80211_msg_put_channel(struct sk_buff *msg,
 			goto nla_put_failure;
 		if ((chan->flags & IEEE80211_CHAN_GO_CONCURRENT) &&
 		    nla_put_flag(msg, NL80211_FREQUENCY_ATTR_GO_CONCURRENT))
+			goto nla_put_failure;
+		if ((chan->flags & IEEE80211_CHAN_NO_20MHZ) &&
+		    nla_put_flag(msg, NL80211_FREQUENCY_ATTR_NO_20MHZ))
+			goto nla_put_failure;
+		if ((chan->flags & IEEE80211_CHAN_NO_10MHZ) &&
+		    nla_put_flag(msg, NL80211_FREQUENCY_ATTR_NO_10MHZ))
 			goto nla_put_failure;
 	}
 
@@ -1247,6 +1261,9 @@ static int nl80211_send_wiphy(struct cfg80211_registered_device *dev,
 		if ((dev->wiphy.flags & WIPHY_FLAG_TDLS_EXTERNAL_SETUP) &&
 		    nla_put_flag(msg, NL80211_ATTR_TDLS_EXTERNAL_SETUP))
 			goto nla_put_failure;
+		if ((dev->wiphy.flags & WIPHY_FLAG_SUPPORTS_5_10_MHZ) &&
+		    nla_put_flag(msg, WIPHY_FLAG_SUPPORTS_5_10_MHZ))
+			goto nla_put_failure;
 
 		(*split_start)++;
 		if (split)
@@ -1834,6 +1851,11 @@ static int nl80211_parse_chandef(struct cfg80211_registered_device *rdev,
 
 	if (!cfg80211_chandef_usable(&rdev->wiphy, chandef,
 				     IEEE80211_CHAN_DISABLED))
+		return -EINVAL;
+
+	if ((chandef->width == NL80211_CHAN_WIDTH_5 ||
+	     chandef->width == NL80211_CHAN_WIDTH_10) &&
+	    !(rdev->wiphy.flags & WIPHY_FLAG_SUPPORTS_5_10_MHZ))
 		return -EINVAL;
 
 	return 0;
@@ -2492,6 +2514,9 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 	enum nl80211_iftype type = NL80211_IFTYPE_UNSPECIFIED;
 	u32 flags;
 
+	/* to avoid failing a new interface creation due to pending removal */
+	cfg80211_destroy_ifaces(rdev);
+
 	memset(&params, 0, sizeof(params));
 
 	if (!info->attrs[NL80211_ATTR_IFNAME])
@@ -2535,6 +2560,9 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 		nlmsg_free(msg);
 		return PTR_ERR(wdev);
 	}
+
+	if (info->attrs[NL80211_ATTR_IFACE_SOCKET_OWNER])
+		wdev->owner_nlportid = info->snd_portid;
 
 	switch (type) {
 	case NL80211_IFTYPE_MESH_POINT:
@@ -4154,6 +4182,16 @@ static int nl80211_new_station(struct sk_buff *skb, struct genl_info *info)
 	if (parse_station_flags(info, dev->ieee80211_ptr->iftype, &params))
 		return -EINVAL;
 
+	/* HT/VHT requires QoS, but if we don't have that just ignore HT/VHT
+	 * as userspace might just pass through the capabilities from the IEs
+	 * directly, rather than enforcing this restriction and returning an
+	 * error in this case.
+	 */
+	if (!(params.sta_flags_set & BIT(NL80211_STA_FLAG_WME))) {
+		params.ht_capa = NULL;
+		params.vht_capa = NULL;
+	}
+
 	/* When you run into this, adjust the code below for the new flag */
 	BUILD_BUG_ON(NL80211_STA_FLAG_MAX != 7);
 
@@ -5678,6 +5716,9 @@ static int nl80211_start_sched_scan(struct sk_buff *skb,
 
 	err = rdev_sched_scan_start(rdev, dev, request);
 	if (!err) {
+		if (info->attrs[NL80211_ATTR_IFACE_SOCKET_OWNER])
+			request->owner_nlportid = info->snd_portid;
+
 		rdev->sched_scan_req = request;
 		nl80211_send_sched_scan(rdev, dev,
 					NL80211_CMD_START_SCHED_SCAN);
@@ -6495,11 +6536,16 @@ static int nl80211_join_ibss(struct sk_buff *skb, struct genl_info *info)
 	if (!cfg80211_reg_can_beacon(&rdev->wiphy, &ibss.chandef))
 		return -EINVAL;
 
-	if (ibss.chandef.width > NL80211_CHAN_WIDTH_40)
+	switch (ibss.chandef.width) {
+	case NL80211_CHAN_WIDTH_20_NOHT:
+		break;
+	case NL80211_CHAN_WIDTH_20:
+	case NL80211_CHAN_WIDTH_40:
+		if (rdev->wiphy.features & NL80211_FEATURE_HT_IBSS)
+			break;
+	default:
 		return -EINVAL;
-	if (ibss.chandef.width != NL80211_CHAN_WIDTH_20_NOHT &&
-	    !(rdev->wiphy.features & NL80211_FEATURE_HT_IBSS))
-		return -EINVAL;
+	}
 
 	ibss.channel_fixed = !!info->attrs[NL80211_ATTR_FREQ_FIXED];
 	ibss.privacy = !!info->attrs[NL80211_ATTR_PRIVACY];
@@ -11070,14 +11116,27 @@ static int nl80211_netlink_notify(struct notifier_block * nb,
 	struct wireless_dev *wdev;
 	struct cfg80211_beacon_registration *reg, *tmp;
 
-	if (state != NETLINK_URELEASE)
+	if (state != NETLINK_URELEASE || notify->protocol != NETLINK_GENERIC)
 		return NOTIFY_DONE;
 
 	rcu_read_lock();
 
 	list_for_each_entry_rcu(rdev, &cfg80211_rdev_list, list) {
-		list_for_each_entry_rcu(wdev, &rdev->wdev_list, list)
+		bool schedule_destroy_work = false;
+		bool schedule_scan_stop = false;
+		struct cfg80211_sched_scan_request *sched_scan_req =
+			rcu_dereference(rdev->sched_scan_req);
+
+		if (sched_scan_req && notify->portid &&
+		    sched_scan_req->owner_nlportid == notify->portid)
+			schedule_scan_stop = true;
+
+		list_for_each_entry_rcu(wdev, &rdev->wdev_list, list) {
 			cfg80211_mlme_unregister_socket(wdev, notify->portid);
+
+			if (wdev->owner_nlportid == notify->portid)
+				schedule_destroy_work = true;
+		}
 
 		spin_lock_bh(&rdev->beacon_registrations_lock);
 		list_for_each_entry_safe(reg, tmp, &rdev->beacon_registrations,
@@ -11089,6 +11148,25 @@ static int nl80211_netlink_notify(struct notifier_block * nb,
 			}
 		}
 		spin_unlock_bh(&rdev->beacon_registrations_lock);
+
+		if (schedule_destroy_work) {
+			struct cfg80211_iface_destroy *destroy;
+
+			destroy = kzalloc(sizeof(*destroy), GFP_ATOMIC);
+			if (destroy) {
+				destroy->nlportid = notify->portid;
+				spin_lock(&rdev->destroy_list_lock);
+				list_add(&destroy->list, &rdev->destroy_list);
+				spin_unlock(&rdev->destroy_list_lock);
+				schedule_work(&rdev->destroy_work);
+			}
+		} else if (schedule_scan_stop) {
+			sched_scan_req->owner_nlportid = 0;
+
+			if (rdev->ops->sched_scan_stop &&
+			    rdev->wiphy.flags & WIPHY_FLAG_SUPPORTS_SCHED_SCAN)
+				schedule_work(&rdev->sched_scan_stop_wk);
+		}
 	}
 
 	rcu_read_unlock();

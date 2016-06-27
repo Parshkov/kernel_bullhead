@@ -98,7 +98,7 @@ CONFIG_QCOM_ESE_UPLOAD := y
 # Feature flags which are not (currently) configurable via Kconfig
 
 #Whether to build debug version
-BUILD_DEBUG_VERSION := 1
+BUILD_DEBUG_VERSION ?= 1
 
 #Enable this flag to build driver in diag version
 BUILD_DIAG_VERSION := 1
@@ -968,8 +968,7 @@ CDEFINES +=	-DWLAN_DEBUG \
 		-DSME_TRACE_RECORD \
 		-DHDD_TRACE_RECORD \
 		-DPE_DEBUG_LOGW \
-		-DPE_DEBUG_LOGE \
-		-DDEBUG
+		-DPE_DEBUG_LOGE
 endif
 
 ifeq ($(CONFIG_SLUB_DEBUG_ON),y)
@@ -1327,7 +1326,7 @@ KBUILD_CPPFLAGS += $(CDEFINES)
 # WLAN driver.  Note that we must use EXTRA_CFLAGS here so that it
 # will override the kernel settings.
 ifeq ($(call cc-option-yn, -Wmaybe-uninitialized),y)
-EXTRA_CFLAGS += -Wmaybe-uninitialized
+EXTRA_CFLAGS += -Os -Wmaybe-uninitialized
 endif
 
 # Module information used by KBuild framework
