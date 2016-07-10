@@ -200,6 +200,7 @@ struct cs_dbs_tuners {
 	unsigned int sampling_down_factor;
 	unsigned int up_threshold;
 	unsigned int down_threshold;
+	unsigned int down_threshold_suspended;
 	unsigned int freq_step;
 	unsigned int input_boost_freq;
 	unsigned int input_boost_duration;
@@ -207,6 +208,7 @@ struct cs_dbs_tuners {
 	unsigned int min_load;
 	unsigned int twostep_counter;
 	u64 twostep_time;
+	unsigned int sleep_death;
 };
 
 struct ex_dbs_tuners {
