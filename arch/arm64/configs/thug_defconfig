@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 3.10.102-thuglife™-bullhead-v1.0 Kernel Configuration
+# Linux/arm64 3.10.102-thuglife™-bullhead-M Kernel Configuration
 #
 CONFIG_ARM64=y
 CONFIG_64BIT=y
@@ -3827,6 +3827,7 @@ CONFIG_KEYS=y
 CONFIG_ENCRYPTED_KEYS=y
 # CONFIG_KEYS_DEBUG_PROC_KEYS is not set
 # CONFIG_SECURITY_DMESG_RESTRICT is not set
+# CONFIG_SECURITY_PERF_EVENTS_RESTRICT is not set
 CONFIG_SECURITY=y
 # CONFIG_SECURITYFS is not set
 CONFIG_SECURITY_NETWORK=y
